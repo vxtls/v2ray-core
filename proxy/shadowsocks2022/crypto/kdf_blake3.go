@@ -1,4 +1,4 @@
-package shadowsocks2022
+package crypto
 
 import (
 	"lukechampine.com/blake3"
@@ -6,7 +6,7 @@ import (
 	"github.com/v2fly/v2ray-core/v5/common/buf"
 )
 
-func newBLAKE3KeyDerivation() *BLAKE3KeyDerivation {
+func NewBLAKE3KeyDerivation() *BLAKE3KeyDerivation {
 	return &BLAKE3KeyDerivation{}
 }
 

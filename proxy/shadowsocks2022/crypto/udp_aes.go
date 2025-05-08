@@ -1,4 +1,4 @@
-package shadowsocks2022
+package crypto
 
 import (
 	"bytes"
@@ -9,16 +9,18 @@ import (
 
 	"github.com/v2fly/v2ray-core/v5/common/buf"
 	"github.com/v2fly/v2ray-core/v5/common/net"
+	"github.com/v2fly/v2ray-core/v5/proxy/shadowsocks2022"
+	"github.com/v2fly/v2ray-core/v5/proxy/shadowsocks2022/shared"
 )
 
 type AESUDPClientPacketProcessor struct {
 	requestSeparateHeaderBlockCipher  cipher.Block
 	responseSeparateHeaderBlockCipher cipher.Block
 	mainPacketAEAD                    func([]byte) cipher.AEAD
-	EIHGenerator                      func([]byte) ExtensibleIdentityHeaders
+	EIHGenerator                      func([]byte) shared.ExtensibleIdentityHeaders // Corrected to shared.ExtensibleIdentityHeaders
 }
 
-func NewAESUDPClientPacketProcessor(requestSeparateHeaderBlockCipher, responseSeparateHeaderBlockCipher cipher.Block, mainPacketAEAD func([]byte) cipher.AEAD, eih func([]byte) ExtensibleIdentityHeaders) *AESUDPClientPacketProcessor {
+func NewAESUDPClientPacketProcessor(requestSeparateHeaderBlockCipher, responseSeparateHeaderBlockCipher cipher.Block, mainPacketAEAD func([]byte) cipher.AEAD, eih func([]byte) shared.ExtensibleIdentityHeaders) *AESUDPClientPacketProcessor { // Corrected to shared.ExtensibleIdentityHeaders
 	return &AESUDPClientPacketProcessor{
 		requestSeparateHeaderBlockCipher:  requestSeparateHeaderBlockCipher,
 		responseSeparateHeaderBlockCipher: responseSeparateHeaderBlockCipher,
@@ -52,8 +54,8 @@ type cachedUDPState struct {
 	sessionRecvAEAD cipher.AEAD
 }
 
-func (p *AESUDPClientPacketProcessor) EncodeUDPRequest(request *UDPRequest, out *buf.Buffer,
-	cache UDPClientPacketProcessorCachedStateContainer,
+func (p *AESUDPClientPacketProcessor) EncodeUDPRequest(request *shared.UDPRequest, out *buf.Buffer, // Changed to shared.UDPRequest
+	cache shared.UDPClientPacketProcessorCachedStateContainer, // Changed to shared.UDPClientPacketProcessorCachedStateContainer
 ) error {
 	separateHeaderStruct := separateHeader{PacketID: request.PacketID, SessionID: request.SessionID}
 	separateHeaderBuffer := buf.New()
@@ -73,7 +75,7 @@ func (p *AESUDPClientPacketProcessor) EncodeUDPRequest(request *UDPRequest, out 
 	if p.EIHGenerator != nil {
 		eih := p.EIHGenerator(separateHeaderBufferBytes[0:16])
 		eihHeader := struct {
-			EIH ExtensibleIdentityHeaders
+			EIH shared.ExtensibleIdentityHeaders // Corrected to shared.ExtensibleIdentityHeaders
 		}{
 			EIH: eih,
 		}
@@ -84,7 +86,7 @@ func (p *AESUDPClientPacketProcessor) EncodeUDPRequest(request *UDPRequest, out 
 	}
 
 	headerStruct := header{
-		Type:          UDPHeaderTypeClientToServerStream,
+		Type:          shadowsocks2022.UDPHeaderTypeClientToServerStream, // Added package prefix
 		TimeStamp:     request.TimeStamp,
 		PaddingLength: 0,
 		Padding:       nil,
@@ -97,7 +99,7 @@ func (p *AESUDPClientPacketProcessor) EncodeUDPRequest(request *UDPRequest, out 
 		}
 	}
 	{
-		err := addrParser.WriteAddressPort(requestBodyBuffer, request.Address, net.Port(request.Port))
+		err := shadowsocks2022.AddrParser.WriteAddressPort(requestBodyBuffer, request.Address, net.Port(request.Port)) // Added package prefix
 		if err != nil {
 			return newError("failed to write address port").Base(err)
 		}
@@ -128,8 +130,8 @@ func (p *AESUDPClientPacketProcessor) EncodeUDPRequest(request *UDPRequest, out 
 	return nil
 }
 
-func (p *AESUDPClientPacketProcessor) DecodeUDPResp(input []byte, resp *UDPResponse,
-	cache UDPClientPacketProcessorCachedStateContainer,
+func (p *AESUDPClientPacketProcessor) DecodeUDPResp(input []byte, resp *shared.UDPResponse, // Changed to shared.UDPResponse
+	cache shared.UDPClientPacketProcessorCachedStateContainer, // Changed to shared.UDPClientPacketProcessorCachedStateContainer
 ) error {
 	separateHeaderBuffer := buf.New()
 	defer separateHeaderBuffer.Release()
@@ -178,7 +180,7 @@ func (p *AESUDPClientPacketProcessor) DecodeUDPResp(input []byte, resp *UDPRespo
 		addressReaderBuf := buf.New()
 		defer addressReaderBuf.Release()
 		var port net.Port
-		resp.Address, port, err = addrParser.ReadAddressPort(addressReaderBuf, decryptedDestReader)
+		resp.Address, port, err = shadowsocks2022.AddrParser.ReadAddressPort(addressReaderBuf, decryptedDestReader) // Added package prefix
 		if err != nil {
 			return newError("failed to read address port").Base(err)
 		}

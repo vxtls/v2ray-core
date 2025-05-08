@@ -1,4 +1,4 @@
-package shadowsocks2022
+package outbound
 
 import (
 	"context"
@@ -9,13 +9,15 @@ import (
 	"time"
 
 	"github.com/v2fly/v2ray-core/v5/common/buf"
+	commonErrors "github.com/v2fly/v2ray-core/v5/common/errors"
 	"github.com/v2fly/v2ray-core/v5/common/net"
+	"github.com/v2fly/v2ray-core/v5/proxy/shadowsocks2022/shared" // Import shared
 	"github.com/v2fly/v2ray-core/v5/transport/internet"
 
 	"github.com/pion/transport/v2/replaydetector"
 )
 
-func NewClientUDPSession(ctx context.Context, conn io.ReadWriteCloser, packetProcessor UDPClientPacketProcessor) *ClientUDPSession {
+func NewClientUDPSession(ctx context.Context, conn io.ReadWriteCloser, packetProcessor shared.UDPClientPacketProcessor) *ClientUDPSession {
 	session := &ClientUDPSession{
 		locker:          &sync.RWMutex{},
 		conn:            conn,
@@ -33,7 +35,7 @@ type ClientUDPSession struct {
 	locker *sync.RWMutex
 
 	conn            io.ReadWriteCloser
-	packetProcessor UDPClientPacketProcessor
+	packetProcessor shared.UDPClientPacketProcessor
 	sessionMap      map[string]*ClientUDPSessionConn
 
 	sessionMapAlias map[string]string
@@ -42,7 +44,7 @@ type ClientUDPSession struct {
 	finish func()
 }
 
-func (c *ClientUDPSession) GetCachedState(sessionID string) UDPClientPacketProcessorCachedState {
+func (c *ClientUDPSession) GetCachedState(sessionID string) shared.UDPClientPacketProcessorCachedState {
 	c.locker.RLock()
 	defer c.locker.RUnlock()
 
@@ -53,7 +55,7 @@ func (c *ClientUDPSession) GetCachedState(sessionID string) UDPClientPacketProce
 	return state.cachedProcessorState
 }
 
-func (c *ClientUDPSession) GetCachedServerState(serverSessionID string) UDPClientPacketProcessorCachedState {
+func (c *ClientUDPSession) GetCachedServerState(serverSessionID string) shared.UDPClientPacketProcessorCachedState {
 	c.locker.RLock()
 	defer c.locker.RUnlock()
 
@@ -81,7 +83,7 @@ func (c *ClientUDPSession) getCachedStateAlias(serverSessionID string) string {
 	return state
 }
 
-func (c *ClientUDPSession) PutCachedState(sessionID string, cache UDPClientPacketProcessorCachedState) {
+func (c *ClientUDPSession) PutCachedState(sessionID string, cache shared.UDPClientPacketProcessorCachedState) {
 	c.locker.RLock()
 	defer c.locker.RUnlock()
 
@@ -92,7 +94,7 @@ func (c *ClientUDPSession) PutCachedState(sessionID string, cache UDPClientPacke
 	state.cachedProcessorState = cache
 }
 
-func (c *ClientUDPSession) PutCachedServerState(serverSessionID string, cache UDPClientPacketProcessorCachedState) {
+func (c *ClientUDPSession) PutCachedServerState(serverSessionID string, cache shared.UDPClientPacketProcessorCachedState) {
 	c.locker.RLock()
 	defer c.locker.RUnlock()
 
@@ -116,7 +118,7 @@ func (c *ClientUDPSession) Close() error {
 	return c.conn.Close()
 }
 
-func (c *ClientUDPSession) WriteUDPRequest(request *UDPRequest) error {
+func (c *ClientUDPSession) WriteUDPRequest(request *shared.UDPRequest) error {
 	buffer := buf.New()
 	defer buffer.Release()
 	err := c.packetProcessor.EncodeUDPRequest(request, buffer, c)
@@ -124,35 +126,35 @@ func (c *ClientUDPSession) WriteUDPRequest(request *UDPRequest) error {
 		request.Payload.Release()
 	}
 	if err != nil {
-		return newError("unable to encode udp request").Base(err)
+		return commonErrors.New("unable to encode udp request").Base(err)
 	}
 	_, err = c.conn.Write(buffer.Bytes())
 	if err != nil {
-		return newError("unable to write to conn").Base(err)
+		return commonErrors.New("unable to write to conn").Base(err)
 	}
 	return nil
 }
 
 func (c *ClientUDPSession) KeepReading() {
 	for c.ctx.Err() == nil {
-		udpResp := &UDPResponse{}
+		udpResp := &shared.UDPResponse{}
 		buffer := make([]byte, 1600)
 		n, err := c.conn.Read(buffer)
 		if err != nil {
-			newError("unable to read from conn").Base(err).WriteToLog()
+			commonErrors.New("unable to read from conn").Base(err).WriteToLog()
 			return
 		}
 		if n != 0 {
 			err := c.packetProcessor.DecodeUDPResp(buffer[:n], udpResp, c)
 			if err != nil {
-				newError("unable to decode udp response").Base(err).WriteToLog()
+				commonErrors.New("unable to decode udp response").Base(err).WriteToLog()
 				continue
 			}
 
 			{
 				timeDifference := int64(udpResp.TimeStamp) - time.Now().Unix()
 				if timeDifference < -30 || timeDifference > 30 {
-					newError("udp packet timestamp difference too large, packet discarded, time diff = ", timeDifference).WriteToLog()
+					commonErrors.New("udp packet timestamp difference too large, packet discarded, time diff = ", timeDifference).WriteToLog()
 					continue
 				}
 			}
@@ -166,7 +168,7 @@ func (c *ClientUDPSession) KeepReading() {
 				default:
 				}
 			} else {
-				newError("misbehaving server: unknown client session ID").Base(err).WriteToLog()
+				commonErrors.New("misbehaving server: unknown client session ID").Base(err).WriteToLog()
 			}
 		}
 	}
@@ -176,14 +178,14 @@ func (c *ClientUDPSession) NewSessionConn() (internet.AbstractPacketConn, error)
 	sessionID := make([]byte, 8)
 	_, err := rand.Read(sessionID)
 	if err != nil {
-		return nil, newError("unable to generate session id").Base(err)
+		return nil, commonErrors.New("unable to generate session id").Base(err)
 	}
 
 	connctx, connfinish := context.WithCancel(c.ctx)
 
 	sessionConn := &ClientUDPSessionConn{
 		sessionID:              string(sessionID),
-		readChan:               make(chan *UDPResponse, 128),
+		readChan:               make(chan *shared.UDPResponse, 128),
 		parent:                 c,
 		ctx:                    connctx,
 		finish:                 connfinish,
@@ -197,20 +199,20 @@ func (c *ClientUDPSession) NewSessionConn() (internet.AbstractPacketConn, error)
 }
 
 type ClientUDPSessionServerTracker struct {
-	cachedRecvProcessorState UDPClientPacketProcessorCachedState
+	cachedRecvProcessorState shared.UDPClientPacketProcessorCachedState
 	rxReplayDetector         replaydetector.ReplayDetector
 	lastSeen                 time.Time
 }
 
 type ClientUDPSessionConn struct {
 	sessionID string
-	readChan  chan *UDPResponse
+	readChan  chan *shared.UDPResponse
 	parent    *ClientUDPSession
 
 	nextWritePacketID      uint64
 	trackedServerSessionID map[string]*ClientUDPSessionServerTracker
 
-	cachedProcessorState UDPClientPacketProcessorCachedState
+	cachedProcessorState shared.UDPClientPacketProcessorCachedState
 
 	ctx    context.Context
 	finish func()
@@ -230,7 +232,7 @@ func (c *ClientUDPSessionConn) Close() error {
 func (c *ClientUDPSessionConn) WriteTo(p []byte, addr gonet.Addr) (n int, err error) {
 	thisPacketID := c.nextWritePacketID
 	c.nextWritePacketID += 1
-	req := &UDPRequest{
+	req := &shared.UDPRequest{
 		SessionID: [8]byte{},
 		PacketID:  thisPacketID,
 		TimeStamp: uint64(time.Now().Unix()),
@@ -243,7 +245,7 @@ func (c *ClientUDPSessionConn) WriteTo(p []byte, addr gonet.Addr) (n int, err er
 	req.Payload.Write(p)
 	err = c.parent.WriteUDPRequest(req)
 	if err != nil {
-		return 0, newError("unable to write to parent session").Base(err)
+		return 0, commonErrors.New("unable to write to parent session").Base(err)
 	}
 	return len(p), nil
 }
@@ -280,7 +282,7 @@ func (c *ClientUDPSessionConn) ReadFrom(p []byte) (n int, addr net.Addr, err err
 			if accept, ok := trackedState.rxReplayDetector.Check(resp.PacketID); ok {
 				accept()
 			} else {
-				newError("misbehaving server: replayed packet").Base(err).WriteToLog()
+				commonErrors.New("misbehaving server: replayed packet").Base(err).WriteToLog()
 				continue
 			}
 			trackedState.lastSeen = time.Now()

@@ -49,6 +49,8 @@ require (
 	lukechampine.com/blake3 v1.4.0
 )
 
+exclude v2ray.com/core v4.19.1+incompatible
+
 require (
 	github.com/aead/cmac v0.0.0-20160719120800-7af84192f0b1 // indirect
 	github.com/ajg/form v1.5.1 // indirect
